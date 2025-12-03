@@ -20,8 +20,7 @@ class AuthController extends Controller
             return response()->json($validator->errors(), 422);
         }
 
-        $loginField = filter_var($request->login, FILTER_VALIDATE_EMAIL) ? 'email' : 'username';
-        $user = User::where($loginField, $request->email)->first();
+        $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json([
@@ -35,7 +34,7 @@ class AuthController extends Controller
             'message' => 'Login berhasil',
             'access_token' => $token,
             'token_type' => 'Bearer',
-            'user' => $user->load('roles:name'),
+            'user' => $user,
         ]);
     }
 }

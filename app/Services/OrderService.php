@@ -11,45 +11,47 @@ class OrderService
 {
     public function createOrder(?string $userId, array $payload): mixed
     {
-        DB::beginTransaction();
-        try {
+        return DB::transaction(function () use ($userId, $payload) {
+
             $total = 0;
             $items = $payload['items'];
+
+            $order = Order::create([
+                'user_id' => $userId,
+                'total'   => 0,
+            ]);
+
             foreach ($items as $item) {
-                $product = Product::where('id', $item['product_id']);
+
+                $product = Product::find($item['product_id']);
+
                 if (!$product) {
-                    return response()->json(['error' => 'Product not found'], 404);
+                    throw new \Exception("Product ID {$item['product_id']} not found");
                 }
 
-                if ($product->stock <= 0) {
-                    DB::rollBack();
-                    return response()->json(['error' => 'Out of stock'], 400);
+                if ($product->stock < $item['quantity']) {
+                    throw new \Exception("Stock not enough for product ID {$item['product_id']}");
                 }
 
-                Product::where('id', $product->id)
-                    ->update(['stock' => $product->stock - $item['quantity']]);
+                $product->decrement('stock', $item['quantity']);
 
-                $total += $product->price * $item['quantity'];
+                $subTotal = $product->price * $item['quantity'];
+                $total += $subTotal;
+
+                OrderItem::create([
+                    'order_id'   => $order->id,
+                    'product_id' => $product->id,
+                    'quantity'   => $item['quantity'],
+                    'price'      => $product->price,
+                ]);
             }
 
-            $orderId = Order::create([
-                'user_id' => $userId,
-                'total' => $total,
-                'created_at' => now(),
-            ]);
+            $order->update(['total' => $total]);
 
-            OrderItem::create([
-                'order_id' => $orderId,
-                'product_id' => $item['product_id'],
-                'quantity' => $item['quantity'],
-                'price' => $product->price,
-            ]);
-
-            DB::commit();
-            return response()->json(['order_id' => $orderId, 'total' => $total], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
+            return [
+                'order_id' => $order->id,
+                'total'    => $total,
+            ];
+        });
     }
 }
