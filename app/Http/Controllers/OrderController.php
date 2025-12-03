@@ -2,59 +2,44 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\OrderService;
+use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function store(Request $request)
+    public function __construct(OrderService $orderService)
     {
-        $userId = $request->input('user_id');
-        $items = $request->input('items'); // should be array of ['product_id' => int, 'quantity' => int]
-
-        if (!$userId || !$items) {
-            return response()->json(['error' => 'Invalid input'], 400);
-        }
-
-        DB::beginTransaction();
+        $this->orderService = $orderService;
+    }
+    public function store(Request $request, OrderService $orderService)
+    {
         try {
-            $total = 0;
-
-            foreach ($items as $item) {
-                $product = DB::table('products')->find($item['product_id']);
-                if (!$product) {
-                    return response()->json(['error' => 'Product not found'], 404);
-                }
-
-                if ($product->stock <= 0) {
-                    DB::rollBack();
-                    return response()->json(['error' => 'Out of stock'], 400);
-                }
-
-                DB::table('order_items')->insert([
-                    'order_id' => null,
-                    'product_id' => $item['product_id'],
-                    'quantity' => $item['quantity'],
-                    'price' => $product->price,
-                ]);
-
-                DB::table('products')->where('id', $product->id)
-                    ->update(['stock' => $product->stock - $item['quantity']]);
-
-                $total += $product->price * $item['quantity'];
-            }
-
-            $orderId = DB::table('orders')->insertGetId([
-                'user_id' => $userId,
-                'total' => $total,
-                'created_at' => now(),
+            $validator = Validator::make($request->all(), [
+                'user_id' => 'nullable|string',
+                'items' => 'nullable|array',
             ]);
 
-            DB::commit();
-            return response()->json(['order_id' => $orderId, 'total' => $total], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['error' => $e->getMessage()], 500);
+            if ($validator->fails()) {
+                throw new ValidationException($validator);
+            }
+            $data = $orderService->createOrder(
+                userId: $request->user()->id,
+                payload: $validator->validate()
+            );
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $data
+            ], 200);
+        } catch (Exception $e) {
+            return response()->json([
+                'status' => 'failed',
+                'message' => $e->getMessage(),
+            ], 400);
         }
     }
 }
